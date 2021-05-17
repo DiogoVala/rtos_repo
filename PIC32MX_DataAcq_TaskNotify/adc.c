@@ -24,7 +24,7 @@ int8_t adcConfig(uint8_t nSamples, uint8_t AnalogPin){
     AD1CON1bits.CLRASAM = 1; /*Stop conversion when 1st A/D converter interrupt is generated and clears ASAM bit automatically*/
     AD1CON1bits.FORM = 0; /* Integer 16 bit output format*/
     AD1CON2bits.VCFG = 0; /* VR+=AVdd; VR-=AVss | Use internal voltage reference*/
-    AD1CON2bits.SMPI = nSamples + 1; /* Number (+1) of consecutive conversions, stored in ADC1BUF0...ADCBUF{SMPI}*/
+    AD1CON2bits.SMPI = nSamples - 1; /* Number (-1) of consecutive conversions, stored in ADC1BUF0...ADCBUF{SMPI}*/
     AD1CON3bits.ADRC = 1; /* ADC Clock is derived from ADC Internal RC  */
     AD1CON3bits.SAMC = 16; /* Sample time is 16TAD ( TAD = 100ns)  (TAD = minimum ADC clock period)*/
     /* Set AN0 as input*/
