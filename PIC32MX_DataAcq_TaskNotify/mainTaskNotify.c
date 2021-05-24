@@ -39,7 +39,7 @@
 #define mainTaskNotifyADC_NUM_SAMPLES 1 /* Number of samples taken by ADC at one time */
 #define mainTaskNotifyMAX_TEMP 100 /* Maximum temperature */
 #define mainTaskNotifyPROC_NUM_SAMPLES 5 /* Number of samples to average */
-#define mainTaskNotifyOUT_STRING_MAX_SIZE 25 /*Maximum string size to print result*/
+#define mainTaskNotifyOUT_STRING_MAX_SIZE 10 /*Maximum string size to print result*/
 
 static volatile uint16_t usADCSample=0; /*Sample taken by ADC & converted to 0-100*/
 static volatile uint16_t usADCAverage=0; /* Average of N samples */
@@ -54,10 +54,12 @@ static TaskHandle_t xProc = NULL, xOut = NULL;
 
 void pvAcq(void *pvParam)
 {
-    TickType_t xLastWakeTime = 0;
+    TickType_t xLastWakeTime;
     
+    xLastWakeTime = xTaskGetTickCount();
+
     while(1) {
-        xLastWakeTime = xTaskGetTickCount();
+        
         usADCSample=((getADCsample()+1)*mainTaskNotifyMAX_TEMP)>>mainTaskNotifyADC_RESOLUTION;
         xTaskNotifyGive(xProc);
         vTaskDelayUntil(&xLastWakeTime, mainTaskNotifyTASK_ACQ_PERIOD_MS);  
@@ -88,7 +90,7 @@ void pvOut(void *pvParam)
     
     while(1) {
         ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
-        snprintf(ucStr,mainTaskNotifyOUT_STRING_MAX_SIZE,"\r\nTemperature: %d.%1d", usADCAverage, usADCAverage_FP);
+        snprintf(ucStr,mainTaskNotifyOUT_STRING_MAX_SIZE,"\r\n%d.%1d", usADCAverage, usADCAverage_FP);
         PrintStr(ucStr);
         usADCAverage=0;
     }

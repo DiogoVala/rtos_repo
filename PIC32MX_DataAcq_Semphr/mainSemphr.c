@@ -58,8 +58,10 @@ void pvAcq(void *pvParam)
     static TickType_t xLastWakeTime = 0;
     xSemaphore_Proc = xSemaphoreCreateBinary();
     
+    xLastWakeTime = xTaskGetTickCount();
+    
     while(1) {
-        xLastWakeTime = xTaskGetTickCount();
+        
         usADCSample=((getADCsample()+1)*mainSemphrMAX_TEMP)>>mainSemphrADC_RESOLUTION;
         xSemaphoreGive(xSemaphore_Proc);
         vTaskDelayUntil(&xLastWakeTime, mainSemphrDATA_ACQ_PERIOD_MS);  

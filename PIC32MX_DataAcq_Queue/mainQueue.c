@@ -58,14 +58,16 @@ typedef struct {
 
 void pvAcq(void *pvParam)
 {
-    static TickType_t xLastWakeTime = 0;
+    static TickType_t xLastWakeTime;
     static uint16_t usADCSample=0;
     portBASE_TYPE xStatus;
     
     xSamplesQueue = xQueueCreate(mainQueueQUEUE_SAMPLES_SIZE, sizeof(usADCSample));
+
+    xLastWakeTime = xTaskGetTickCount();
     
     while(1) {
-        xLastWakeTime = xTaskGetTickCount();
+        
         usADCSample =((getADCsample()+1)*mainQueueMAX_TEMP)>>mainQueueADC_RESOLUTION;
         xStatus = xQueueSend(xSamplesQueue, (void *)&usADCSample, (TickType_t)0);
         if(xStatus != pdPASS){
@@ -113,7 +115,7 @@ void pvOut(void *pvParam)
     while(1) {
         if(xAveragesQueue != NULL) {
             if (xQueueReceive(xAveragesQueue, (xResult_t*)&xRxedResult, portMAX_DELAY) == pdPASS ) {
-                snprintf(ucStr,mainQueueOUT_STRING_MAX_SIZE,"\r\nTemperature: %d.%d", xRxedResult.usADCAverage, xRxedResult.usADCAverage_FP);
+                snprintf(ucStr,mainQueueOUT_STRING_MAX_SIZE,"\r\n%d.%d", xRxedResult.usADCAverage, xRxedResult.usADCAverage_FP);
                 PrintStr(ucStr);
             }
         }
