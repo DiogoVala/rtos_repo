@@ -39,14 +39,14 @@
 #define mainAwgPWM_FREQUENCY 200000 /* frequency of PWM signal to be applied to filter*/
 #define mainAwgSELECTED_TIMER 2 /* Timer 2 as source for OC1 */
 
-#define mainAwgWAVEFORM_SIZE 1000 /* Number of duty cyclle samples per period of output signal*/
+#define mainAwgWAVEFORM_SIZE 400 /* Number of duty cycle samples per period of output signal*/
 
 /* Max vars of system */
 #define mainAwgMAX_FREQUENCY 300
 #define mainAwgMAX_AMPLITUDE 33
 #define mainAwgMAX_PHASE 360
 
-#define mainAwgINPUT_BUFFER_SIZE 11 /* Max number of bytes to add to input buffer */
+#define mainAwgINPUT_BUFFER_SIZE 6 /* Max number of bytes to add to input buffer */
 
 static const uint16_t mainAwgTRIGGER_WIDTH = mainAwgWAVEFORM_SIZE/20; /* Number of samples that the trigger stays HIGH*/
 
@@ -68,11 +68,11 @@ QueueHandle_t xArbWaveInputQueue = NULL;
 
 /* Wave types */
 enum WaveForm_t{
+    WAVE_OFF,
     WAVE_SINE,
     WAVE_SQUARE,
     WAVE_TRIANGLE,
-    WAVE_ARBITRARY,
-    WAVE_OFF
+    WAVE_ARBITRARY
 };
 
 /* Task handles */
@@ -96,6 +96,9 @@ void pvLoadWaveform( void *pvParam)
     while(1)
     {
         xQueueReceive( xArbWaveInputQueue, (uint8_t*)&ucInput, portMAX_DELAY);
+        
+        Timer3Stop();
+        ucCommandOrWave = false;
         
         /* Form sample */
         if(ucInput!='\r' && ucInput!='\n'){
@@ -128,9 +131,10 @@ void pvInterface(void *pvParam)
 {    
     static uint8_t ucBuffer[mainAwgINPUT_BUFFER_SIZE]={'0'};
     static uint8_t ucBufIdx=0;
-    
+        
     uint8_t  ucInput = '\0';
-    uint8_t  ucNewWavetype;
+    uint8_t  ucCommand = '\0';
+    
     uint16_t usNewFrequency;
     uint8_t  ucNewWaveAmplitude;
     uint16_t usNewPhase;
@@ -138,22 +142,11 @@ void pvInterface(void *pvParam)
     while(1) {
         xQueueReceive( xInputQueue, (uint8_t*)&ucInput, portMAX_DELAY);
         
-        /* Prepare system to load a waveform file */
-        if(ucInput == 'l') 
-        {           
-            /* Empty input buffer */
-            ucBufIdx=0;
-            memset(ucBuffer, '\0', mainAwgINPUT_BUFFER_SIZE);
-          
-            ucCommandOrWave=false; /* Switch UART target to LoadWaveform Task to receive wave*/
-            
-            Timer3Stop(); /* Stop wave output */
-            
-            printf("%Ready to load waveform. \n");
-        }
+       
         /* Reset input buffer and current queue*/
-        else if(ucInput == 'r')
+        if(ucInput == 'r')
         {
+            printf("\r\n");
             ucBufIdx=0;
             xQueueReset(xArbWaveInputQueue);
             memset(ucBuffer, '\0', mainAwgINPUT_BUFFER_SIZE);
@@ -161,24 +154,38 @@ void pvInterface(void *pvParam)
         /* Put valid bytes into input buffer */
         else if((ucInput >= '0'  && ucInput <= '9' ) || (ucInput >= 'A'  && ucInput <= 'Z' )\
                 || (ucInput >= 'a'  && ucInput <= 'z' )){
+            
             printf("%c", ucInput);
             ucBuffer[ucBufIdx]=ucInput;
             ucBufIdx++;
             if(ucBufIdx>=mainAwgINPUT_BUFFER_SIZE-1){
                 ucBufIdx=0;
+                memset(ucBuffer, '\0', mainAwgINPUT_BUFFER_SIZE);
                 printf("\rInvalid command.\n");
             }  
         }
         /* On New line, evaluate buffer and update variables */
         else if(ucInput=='\r')
         {
-            printf("\r\n");
+            printf("\r\n\n");
             
             Timer3Stop(); /* Stop wave output */
             
-            ucNewWavetype=ucBuffer[0];
-            switch(ucNewWavetype)
-            {
+            ucCommand=ucBuffer[0];
+            
+            switch(ucCommand){
+                case 'f':
+                case 'F':
+                    usNewFrequency=(ucBuffer[1]-'0')*100+(ucBuffer[2]-'0')*10+(ucBuffer[3]-'0');
+                    break;
+                case 'v':
+                case 'V':
+                    ucNewWaveAmplitude=(ucBuffer[1]-'0')*10+(ucBuffer[2]-'0');
+                    break;
+                case 'p':
+                case 'P':
+                    usNewPhase = (ucBuffer[1]-'0')*100+(ucBuffer[2]-'0')*10+(ucBuffer[3]-'0');
+                    break;
                 case 's':
                 case 'S':
                     ucWavetype=WAVE_SINE;
@@ -205,11 +212,13 @@ void pvInterface(void *pvParam)
                     printf("\rWave: Off\n");
                     break;
                 default:
-                    printf("\rInvalid wave type.\n");
+                    printf("\rInvalid Command.\n");
                     break;
             }
-            
-            usNewFrequency=(ucBuffer[1]-'0')*100+(ucBuffer[2]-'0')*10+(ucBuffer[3]-'0');
+            /* Empty input buffer */
+            ucBufIdx=0;
+            memset(ucBuffer, '\0', mainAwgINPUT_BUFFER_SIZE);
+           
             if(usNewFrequency<=mainAwgMAX_FREQUENCY)
             {
                 usFrequency=usNewFrequency;
@@ -219,8 +228,7 @@ void pvInterface(void *pvParam)
             {
                 printf("\rInvalid frequency.\n");
             }
-            
-            ucNewWaveAmplitude=(ucBuffer[4]-'0')*10+(ucBuffer[5]-'0');
+
             if(ucNewWaveAmplitude<=mainAwgMAX_AMPLITUDE)
             {
                 ucWaveAmplitude = ucNewWaveAmplitude;
@@ -232,7 +240,6 @@ void pvInterface(void *pvParam)
                 printf("\rInvalid amplitude.\n");
             }
             
-            usNewPhase = (ucBuffer[6]-'0')*100+(ucBuffer[7]-'0')*10+(ucBuffer[8]-'0');
             if(usNewPhase<=mainAwgMAX_PHASE)
             {
                 usPhase = usNewPhase;
@@ -244,10 +251,6 @@ void pvInterface(void *pvParam)
                 printf("\rInvalid phase.\n");
             }
             
-            /* Empty input buffer */
-            ucBufIdx=0;
-            memset(ucBuffer, '\0', mainAwgINPUT_BUFFER_SIZE);
-
             xTaskNotifyGive(xWaveformGenerator);
         }
     }
@@ -327,7 +330,7 @@ int mainAWG( void )
 {
     /* ISRs */
     void __attribute__( (interrupt(IPL2AUTO), vector(_TIMER_3_VECTOR))) vT3InterruptWrapper(void);
-    void __attribute__( (interrupt(IPL4AUTO), vector(_UART_1_VECTOR))) vU1InterruptWrapper(void);
+    void __attribute__( (interrupt(IPL5AUTO), vector(_UART_1_VECTOR))) vU1InterruptWrapper(void);
     
     /* PWM Timer and OC */
     Timer2Config(mainAwgPWM_FREQUENCY);
@@ -353,18 +356,18 @@ int mainAWG( void )
     
     
     U1STAbits.URXISEL = 0; /* Interrupt on each new byte */
-    IPC6bits.U1IP = 4; /* Interrupt priority */
+    IPC6bits.U1IP = 5; /* Interrupt priority */
     IEC0bits.U1RXIE = 1; /* Enable receive interupts */
     IFS0bits.U1RXIF = 0; /* Clear the rx interrupt flag */
     __XC_UART = 1; /* Redirect stdin/stdout/stderr to UART1 */
     
     printf("\033[2J");
     printf("\rArbitrary Waveform Generator - Diogo Vala & Beatriz Silva\n");
-    printf("\rCommand format: wfffaappp\n");
-    printf("\rw -> s (sine); t(triangle); q(square); a(arbitrary)\n");
-    printf("\rfff -> 000-300\n");
-    printf("\raa -> 00-33\n");
-    printf("\rppp -> 000-360\n");
+    printf("\rCommands: \n");
+    printf("\rs (sine); t(triangle); q(square); a(arbitrary)\n");
+    printf("\rFxxx -> 000-300\n");
+    printf("\rVxx -> 00-33\n");
+    printf("\rPxxx -> 000-360\n");
     
     xInputQueue = xQueueCreate(mainAwgINPUT_BUFFER_SIZE, sizeof(uint8_t));
     xArbWaveInputQueue = xQueueCreate(mainAwgWAVEFORM_SIZE*10, sizeof(uint8_t));
@@ -387,6 +390,7 @@ void vT3InterruptHandler(void)
 {
     OC1SetDutyCycle(usWaveform[usWaveIndex]);
     
+    /* External trigger */
     if(usWaveIndex < mainAwgTRIGGER_WIDTH)
     {
         LATEbits.LATE8 = 1;
@@ -408,7 +412,7 @@ void vT3InterruptHandler(void)
 /* UART ISR */
 void vU1InterruptHandler(void) {
     
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    BaseType_t xHigherPriorityTaskWoken = pdTRUE;
     
     uint8_t ucInput=0;
     
@@ -420,7 +424,7 @@ void vU1InterruptHandler(void) {
     
     IFS0bits.U1RXIF = 0; //clear the rx interupt flag  
     
-    if(ucCommandOrWave)
+    if(ucInput!='l' && ucCommandOrWave)
     {
         xQueueSendFromISR(xInputQueue, (void*)&ucInput, &xHigherPriorityTaskWoken);
     }
