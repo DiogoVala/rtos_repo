@@ -1,16 +1,10 @@
 /*
- * 28-May-2021
+ * 18-Jun-2021
  * Beatriz Silva 85276
  * Diogo Vala 64671
  *
  *******************************************************************************
- * This program runs 3 tasks.
- * IPC is achieved using Queues.
- * Task ACQ takes samples from AN0. 
- * Task PROC takes each sample and sums them together. At 5 samples,
- * calculates average.
- * Task OUT takes the average and prints the result.
- *  
+ * Arbitrary waveform generator
  */
 
 /* Standard includes. */
@@ -95,7 +89,6 @@ static TaskHandle_t xSequencer = NULL, xInterface = NULL, xWaveformGenerator= NU
  */
 void pvLoadWaveform( void *pvParam)
 {
-    static uint16_t usIterator = 0;
     uint8_t ucRxInput = '\0';
             
     while(1)
@@ -120,7 +113,7 @@ void pvInterface(void *pvParam)
     static uint8_t ucBufIdx=0;
         
     uint8_t  ucRxInput = '\0';
-    uint8_t  ucCommand = '\0';
+    uint8_t  ucCommand = '\0'; /* First byte of the buffer indicates the command */
     
     uint16_t usNewFrequency;
     uint8_t  ucNewWaveAmplitude;
@@ -248,7 +241,6 @@ void pvInterface(void *pvParam)
                 }
                 usPhase = usNewPhase;
                 usPhaseIndex = usPhase*mainAwgWAVEFORM_SIZE/mainAwgMAX_PHASE;
-                printf("\rIndex: %d Deg\n\n", usPhaseIndex);
                 printf("\rPhase: %d Deg\n\n", usPhase);
             }
             else
@@ -260,6 +252,10 @@ void pvInterface(void *pvParam)
             {
                 usDuty = usNewDuty;
                 printf("\rDuty: %d Deg\n\n", usDuty); 
+            }
+            else
+            {
+                printf("\rInvalid duty.\n");
             }
             
             xTaskNotifyGive(xWaveformGenerator);
