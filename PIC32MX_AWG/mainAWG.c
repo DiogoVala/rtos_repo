@@ -30,16 +30,17 @@
 #define mainAWGTASK_INTERFACE_PRIORITY              ( tskIDLE_PRIORITY + 2 )
 #define mainAWGTASK_WAVEFORM_GENERATOR_PRIORITY	    ( tskIDLE_PRIORITY + 1 )
 
-#define mainAwgPWM_FREQUENCY 150000 /* frequency of PWM signal to be applied to filter*/
+/* PWM signal to be applied to filter*/
+#define mainAwgPWM_FREQUENCY 158102 /* Frequency that sets PR2 to 254 (duty steps) - 1 , for exact duty cycle steps */
 #define mainAwgSELECTED_TIMER 2 /* Timer 2 as source for OC1 */
 
 #define mainAwgWAVEFORM_SIZE 400 /* Number of duty cycle samples per period of output signal*/
 
 /* Max vars of system */
-#define mainAwgMAX_FREQUENCY 300
-#define mainAwgMAX_AMPLITUDE 33
-#define mainAwgMAX_PHASE 360
-#define mainAwgMAX_DUTY 100
+#define mainAwgMAX_FREQUENCY 300 /* 0 - 300 Hz*/
+#define mainAwgMAX_AMPLITUDE 33 /* 0 - 3.3 V */
+#define mainAwgMAX_PHASE 360 /* 0 - 360 Deg */
+#define mainAwgMAX_DUTY 100 /* 0 - 100 % */
 
 #define mainAwgINPUT_BUFFER_SIZE 6 /* Max number of bytes to add to input buffer */
 
@@ -59,7 +60,6 @@ static volatile uint16_t usPhaseIndex = 0; /* Starting index for the duty cycle 
 static volatile uint16_t usWaveIndex = 0; /* Index of usWaveform[] to send to OC1 */
 static volatile uint16_t usArbWaveIndex = 0; /* Index of arbitrary wave array */
 static volatile uint8_t usMaxDutycycle = 0; /* Maximum value of duty cycle according to desired amplitude */
-static const uint16_t mainAwgMARKER_WIDTH = mainAwgWAVEFORM_SIZE/20; /* Number of samples that the trigger stays HIGH*/
 
 static volatile bool ucIsCommand = true; /* To distinguish between normal command or waveform file input*/
 
@@ -71,8 +71,8 @@ QueueHandle_t xArbWaveInputQueue = NULL;
 enum WaveForm_t{
     WAVE_OFF,
     WAVE_SINE,
-    WAVE_SQUARE,
     WAVE_TRIANGLE,
+    WAVE_SQUARE,
     WAVE_ARBITRARY
 };
 
@@ -86,6 +86,7 @@ static TaskHandle_t xSequencer = NULL, xInterface = NULL, xWaveformGenerator= NU
 /* Task called when system is receiving an arbitrary waveform file 
  * 
  * Takes each byte from UART and stores them in usArbitraryWaveform[].
+ * Executes upon the existence of a byte in Queue
  */
 void pvLoadWaveform( void *pvParam)
 {
@@ -106,6 +107,7 @@ void pvLoadWaveform( void *pvParam)
  * 
  * Evaluates each byte and constructs a command sequence.
  * Updates system variables according to the command sequence.
+ * Executes upon the existence of a byte in Queue
  */
 void pvInterface(void *pvParam)
 {    
@@ -115,10 +117,10 @@ void pvInterface(void *pvParam)
     uint8_t  ucRxInput = '\0';
     uint8_t  ucCommand = '\0'; /* First byte of the buffer indicates the command */
     
-    uint16_t usNewFrequency;
-    uint8_t  ucNewWaveAmplitude;
-    uint16_t usNewPhase;
-    uint8_t usNewDuty;
+    uint32_t usNewFrequency;
+    uint32_t ucNewWaveAmplitude;
+    uint32_t usNewPhase;
+    uint32_t usNewDuty;
     
     while(1) {
         
@@ -153,6 +155,7 @@ void pvInterface(void *pvParam)
             ucCommand=ucBuffer[0];
             
             Timer3Stop(); /* Stop wave output */
+            OC1SetDutyCycle(0);
             
             switch(ucCommand){
                 case 'f':
@@ -210,7 +213,7 @@ void pvInterface(void *pvParam)
             }
             else if(usNewFrequency<=mainAwgMAX_FREQUENCY)
             {
-                usFrequency=usNewFrequency;
+                usFrequency=(uint16_t)usNewFrequency;
                 printf("\rFreq: %d Hz\n", usFrequency);
             }
             else
@@ -224,7 +227,7 @@ void pvInterface(void *pvParam)
             }
             else if(ucNewWaveAmplitude<=mainAwgMAX_AMPLITUDE)
             {
-                ucWaveAmplitude = ucNewWaveAmplitude;
+                ucWaveAmplitude = (uint8_t)ucNewWaveAmplitude;
                 usMaxDutycycle = ucWaveAmplitude*oc1MAX_DUTYCYCLE/mainAwgMAX_AMPLITUDE;
                 printf("\rAmp: %d.%d V\n", ucWaveAmplitude/10,ucWaveAmplitude%10);
             }
@@ -239,9 +242,9 @@ void pvInterface(void *pvParam)
                 {
                     usNewPhase=0;
                 }
-                usPhase = usNewPhase;
+                usPhase = (uint16_t)usNewPhase;
                 usPhaseIndex = usPhase*mainAwgWAVEFORM_SIZE/mainAwgMAX_PHASE;
-                printf("\rPhase: %d Deg\n\n", usPhase);
+                printf("\rPhase: %d Deg\n", usPhase);
             }
             else
             {
@@ -250,8 +253,8 @@ void pvInterface(void *pvParam)
             
             if(usNewDuty<=mainAwgMAX_DUTY)
             {
-                usDuty = usNewDuty;
-                printf("\rDuty: %d Deg\n\n", usDuty); 
+                usDuty = (uint8_t)usNewDuty;
+                printf("\rDuty: %d %%\n\n", usDuty); 
             }
             else
             {
@@ -266,6 +269,7 @@ void pvInterface(void *pvParam)
 /* Task called to generate usWaveform[] array of samples for desired output signal 
  * 
  * Generates one period of the signal with the desired amplitude
+ * Executes on notification from the Interface Task
  */
 void pvWaveformGenerator(void *pvParam)
 {
@@ -285,12 +289,10 @@ void pvWaveformGenerator(void *pvParam)
                     if(usIterator < usDutyIndex/2)
                     {
                         usWaveform[usIterator]=usWaveform[usIterator]=(uint8_t)ceil(((float)usMaxDutycycle/2*sin((2*M_PI*(usIterator+1))/mainAwgWAVEFORM_SIZE)+usMaxDutycycle/2));
-                    
                     }
                     if(usIterator > mainAwgWAVEFORM_SIZE/2 && usIterator < (mainAwgWAVEFORM_SIZE/2 + usDutyIndex/2))
                     {
                         usWaveform[usIterator]=usWaveform[usIterator]=(uint8_t)ceil(((float)usMaxDutycycle/2*sin((2*M_PI*(usIterator+1))/mainAwgWAVEFORM_SIZE)+usMaxDutycycle/2));
-                    
                     }  
                 }
                 break;
@@ -408,9 +410,21 @@ int mainAWG( void )
 	return 0;
 }
 
-/* Timer3 ISR */
+/* Timer3 ISR 
+ * 
+ * Updates the duty cycle value to be applied to OC1
+ * External marker is set to 1 at the start of the period and
+ * set back to 0 after mainAwgMARKER_WIDTH samples.
+ * 
+ * Frequency of timer 3 is mainAwgWAVEFORM_SIZE*ucFrequency,
+ * updates upon every new command.
+ * 
+*/
 void vT3InterruptHandler(void)
 {
+    static const uint16_t mainAwgMARKER_WIDTH = mainAwgWAVEFORM_SIZE/20; /* Number of samples that the trigger stays HIGH*/
+    
+    /* Update duty cycle */
     OC1SetDutyCycle(usWaveform[usWaveIndex]);
 
     /* External Marker */
@@ -423,6 +437,7 @@ void vT3InterruptHandler(void)
         LATEbits.LATE8 = 0;
     }
     
+    /* Repeat period */
     usWaveIndex++;
     if(usWaveIndex>=mainAwgWAVEFORM_SIZE)
     {
@@ -432,9 +447,21 @@ void vT3InterruptHandler(void)
     Timer3ResetInterruptFlag();
 }
 
-/* UART ISR */
+/* UART ISR 
+ * 
+ * Receives serial inputs byte by byte.
+ *  
+ * Checks if the input is 'l', that signifies the start of an arbitrary wave
+ * input.
+ * Checks if the input is 0xFF, that signifies the end of transfer for the
+ * arbitrary wave
+ * 
+ * Sends the received byte to either the Interface or LoadWave task, according
+ * to a flag, via two queues.
+ */
 void vU1InterruptHandler(void) {
    
+    /* Received byte */
     uint8_t ucTxInput=0;
     
     while (!U1STAbits.URXDA);
@@ -447,7 +474,7 @@ void vU1InterruptHandler(void) {
         ucIsCommand=false; /* Next inputs will not be commands, send them to LoadWave task */
         usArbWaveIndex = 0; /* Set usArbitraryWaveform[] to index 0 to load new wave*/
     }
-    else if(ucTxInput=='x')
+    else if(ucTxInput==0xFF) /* End of wave input */
     {
         Timer3Start();
         ucIsCommand=true; /* Next inputs are commands, send them to interface task */
