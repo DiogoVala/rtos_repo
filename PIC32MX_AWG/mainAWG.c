@@ -463,11 +463,19 @@ void vU1InterruptHandler(void) {
    
     /* Received byte */
     uint8_t ucTxInput=0;
+    uint8_t ucTrash;
+    bool ucHasRxed = false;
     
-    while (!U1STAbits.URXDA);
-    if ((U1STAbits.PERR == 0) && (U1STAbits.FERR == 0)) {
-        GetChar(&ucTxInput);
-    }
+    if(U1STAbits.OERR ||U1STAbits.FERR || U1STAbits.PERR) // receive errors?
+	{
+		ucTrash = U1RXREG; /* dummy read to clear FERR/PERR */
+		U1STAbits.OERR = 0; /* clear OERR to keep receiving */
+	}
+	if(U1STAbits.URXDA)
+	{
+		ucTxInput = U1ARXREG; /* get data from UART RX FIFO */
+        ucHasRxed=true;
+	}
     
     if(ucTxInput=='l')
     {
@@ -482,12 +490,20 @@ void vU1InterruptHandler(void) {
     
     IFS0bits.U1RXIF = 0; /* clear the RX interrupt flag */
     
-    if(ucIsCommand)
-    {
-        xQueueSendFromISR(xInputQueue, (void*)&ucTxInput, NULL);
-    }
-    else
-    {
-        xQueueSendFromISR(xArbWaveInputQueue, (void*)&ucTxInput, NULL);
+    if(ucHasRxed){
+        if(ucIsCommand)
+        {
+            if(xQueueSendFromISR(xInputQueue, (void*)&ucTxInput, NULL) != pdTRUE )
+            {
+                printf("\rERROR: INPUT QUEUE FULL.\n");
+            }
+        }
+        else
+        {
+            if(xQueueSendFromISR(xArbWaveInputQueue, (void*)&ucTxInput, NULL) != pdTRUE )
+            {
+                printf("\rERROR: ARBITRARY WAVE QUEUE FULL.\n");
+            }
+        }
     }
 }
