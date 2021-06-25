@@ -1,1 +1,0 @@
-open rgb_doc

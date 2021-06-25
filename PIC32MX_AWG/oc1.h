@@ -17,7 +17,7 @@
 
 #define oc1START 1
 #define oc1STOP 0
-#define oc1MAX_DUTYCYCLE 255
+#define oc1MAX_DUTYCYCLE 254
 
 /********************************************************************
  * Function: 	 OC1Config()

@@ -25,10 +25,12 @@
 #include "timer3.h"
 #include "oc1.h"
 
+#define DEBUGGING 0 /* To test each task's behaviour */
+
 /* Priorities of the demo application tasks (high numb. -> high prio.) */
 #define mainAWGTASK_LOADWAVEFORM_PRIORITY           ( tskIDLE_PRIORITY + 3 )
-#define mainAWGTASK_INTERFACE_PRIORITY              ( tskIDLE_PRIORITY + 2 )
-#define mainAWGTASK_WAVEFORM_GENERATOR_PRIORITY	    ( tskIDLE_PRIORITY + 1 )
+#define mainAWGTASK_INTERFACE_PRIORITY              ( tskIDLE_PRIORITY + 1 )
+#define mainAWGTASK_WAVEFORM_GENERATOR_PRIORITY	    ( tskIDLE_PRIORITY + 2 )
 
 /* PWM signal to be applied to filter*/
 #define mainAwgPWM_FREQUENCY 158102 /* Frequency that sets PR2 to 254 (duty steps) - 1 , for exact duty cycle steps */
@@ -97,9 +99,13 @@ void pvLoadWaveform( void *pvParam)
         xQueueReceive( xArbWaveInputQueue, (uint8_t*)&ucRxInput, portMAX_DELAY);
         
         Timer3Stop();
-
+        
         usArbitraryWaveform[usArbWaveIndex]=ucRxInput;
         usArbWaveIndex++;
+        
+        #if DEBUGGING
+        printf("\r\n%d", ucRxInput);
+        #endif
     }
 }
 
@@ -115,7 +121,7 @@ void pvInterface(void *pvParam)
     static uint8_t ucBufIdx=0;
         
     uint8_t  ucRxInput = '\0';
-    uint8_t  ucCommand = '\0'; /* First byte of the buffer indicates the command */
+    uint8_t  ucCommand = '\0'; 
     
     uint32_t usNewFrequency;
     uint32_t ucNewWaveAmplitude;
@@ -126,22 +132,14 @@ void pvInterface(void *pvParam)
         
         xQueueReceive( xInputQueue, (uint8_t*)&ucRxInput, portMAX_DELAY);
         
-        /* Reset input buffer and current queue*/
-        if(ucRxInput == 'r')
-        {
-            printf("\r\n");
-            ucBufIdx=0;
-            xQueueReset(xArbWaveInputQueue);
-            memset(ucBuffer, '\0', mainAwgINPUT_BUFFER_SIZE);
-        }
         /* Put valid bytes into input buffer */
-        else if((ucRxInput >= '0'  && ucRxInput <= '9' ) || (ucRxInput >= 'A'  && ucRxInput <= 'Z' )\
+        if((ucRxInput >= '0'  && ucRxInput <= '9' ) || (ucRxInput >= 'A'  && ucRxInput <= 'Z' )\
                 || (ucRxInput >= 'a'  && ucRxInput <= 'z' )){
             
             printf("%c", ucRxInput);
-            ucBuffer[ucBufIdx]=ucRxInput;
+            ucBuffer[ucBufIdx]=ucRxInput; /* Add to buffer */
             ucBufIdx++;
-            if(ucBufIdx>=mainAwgINPUT_BUFFER_SIZE-1){
+            if(ucBufIdx>=mainAwgINPUT_BUFFER_SIZE-1){ /* Buffer limit */
                 ucBufIdx=0;
                 memset(ucBuffer, '\0', mainAwgINPUT_BUFFER_SIZE);
                 printf("\rInvalid command.\n");
@@ -152,10 +150,15 @@ void pvInterface(void *pvParam)
         {
             printf("\r\n\n");
             
-            ucCommand=ucBuffer[0];
+            ucCommand=ucBuffer[0]; /* First byte of the buffer indicates the command */
             
             Timer3Stop(); /* Stop wave output */
-            OC1SetDutyCycle(0);
+            
+            if(OC1SetDutyCycle(0) != 0)
+            {
+                printf("\r\nError changing OC1RS.");
+                while(1);
+            }
             
             switch(ucCommand){
                 case 'f':
@@ -207,6 +210,7 @@ void pvInterface(void *pvParam)
             ucBufIdx=0;
             memset(ucBuffer, '\0', mainAwgINPUT_BUFFER_SIZE);
            
+            /* Check validity of new parameters */
             if(usNewFrequency == 0)
             {
                 ucWavetype=WAVE_OFF;
@@ -277,12 +281,11 @@ void pvWaveformGenerator(void *pvParam)
     
     while(1) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-            
-        uint16_t usDutyIndex=(usDuty*mainAwgWAVEFORM_SIZE/mainAwgMAX_DUTY);
+        
+        uint16_t usDutyIndex=(usDuty*mainAwgWAVEFORM_SIZE/mainAwgMAX_DUTY); /* Index corresponding to the desired duty cycle's transition zone */
         
         switch(ucWavetype){
-                
-            case WAVE_SINE:
+            case WAVE_SINE: 
                 for(usIterator = 0; usIterator < mainAwgWAVEFORM_SIZE; usIterator++)
                 {
                     usWaveform[usIterator]=usMaxDutycycle/2;
@@ -293,7 +296,7 @@ void pvWaveformGenerator(void *pvParam)
                     if(usIterator > mainAwgWAVEFORM_SIZE/2 && usIterator < (mainAwgWAVEFORM_SIZE/2 + usDutyIndex/2))
                     {
                         usWaveform[usIterator]=usWaveform[usIterator]=(uint8_t)ceil(((float)usMaxDutycycle/2*sin((2*M_PI*(usIterator+1))/mainAwgWAVEFORM_SIZE)+usMaxDutycycle/2));
-                    }  
+                    }
                 }
                 break;
                 
@@ -314,7 +317,7 @@ void pvWaveformGenerator(void *pvParam)
             case WAVE_TRIANGLE:
                 for(usIterator = 0; usIterator < mainAwgWAVEFORM_SIZE; usIterator++)
                 {
-                    if(usIterator < (usDuty*mainAwgWAVEFORM_SIZE/mainAwgMAX_DUTY))
+                    if(usIterator < usDutyIndex)
                     {
                         usWaveform[usIterator]=(uint8_t)(usIterator*usMaxDutycycle/usDutyIndex);
                     }
@@ -341,15 +344,27 @@ void pvWaveformGenerator(void *pvParam)
                 break;
         }
         
+        #if DEBUGGING
+        printf("\r\nWave Samples:");
+        for(usIterator = 0; usIterator < mainAwgWAVEFORM_SIZE; usIterator++)
+        {
+            printf("\r\n%d", usWaveform[usIterator]);
+        }
+        #endif
+        
         /* Update Timer 3 */
-        Timer3Config(mainAwgWAVEFORM_SIZE*usFrequency);
+        if(Timer3Config(mainAwgWAVEFORM_SIZE*usFrequency) != 0)
+        {
+            printf("\r\nError configuring Timer 3.");
+            while(1);
+        }
         Timer3InterruptConfig(1);
         Timer3Start();
     }
 }
 
 /*
- * Create the demo tasks then start the scheduler.
+ * Create the tasks then start the scheduler.
  */
 int mainAWG( void )
 {
@@ -358,15 +373,28 @@ int mainAWG( void )
     void __attribute__( (interrupt(IPL4AUTO), vector(_UART_1_VECTOR))) vU1InterruptWrapper(void);
     
     /* PWM Timer and OC */
-    Timer2Config(mainAwgPWM_FREQUENCY);
-    OC1Config(mainAwgSELECTED_TIMER);
+    if(Timer2Config(mainAwgPWM_FREQUENCY) != 0)
+    {
+        printf("\r\nError configuring Timer 2.");
+        while(1);
+    }
+    if(OC1Config(mainAwgSELECTED_TIMER) != 0)
+    {
+        printf("\r\nError configuring OC1.");
+        while(1);
+    }
     OC1Control(oc1START);
     Timer2Start();
-    OC1SetDutyCycle(0);
+    
+    if(OC1SetDutyCycle(0) != 0)
+    {
+        printf("\r\nError changing OC1RS.");
+        while(1);
+    }
      
     /* Set RD0 as digital output (OC1) */
     TRISDbits.TRISD0 = 0;
-    PORTDbits.RD0 = 1;
+    PORTDbits.RD0 = 0;
     
     /* Set RE8 as digital output (External Marker) */
     TRISEbits.TRISE8 = 0;
@@ -374,7 +402,7 @@ int mainAWG( void )
     
 	/* Init UART and redirect tdin/stdot/stderr to UART */
     if(UartInit(configPERIPHERAL_CLOCK_HZ, 115200) != UART_SUCCESS) {
-        PORTAbits.RA3 = 1; // If Led active error initializing UART
+        printf("\r\nError configuring UART");
         while(1);
     }
     U1STAbits.URXISEL = 0; /* Interrupt on each new byte */
@@ -422,13 +450,21 @@ int mainAWG( void )
 */
 void vT3InterruptHandler(void)
 {
-    static const uint16_t mainAwgMARKER_WIDTH = mainAwgWAVEFORM_SIZE/20; /* Number of samples that the trigger stays HIGH*/
+    static const uint16_t mainAwgMARKER_WIDTH = mainAwgWAVEFORM_SIZE/20; /* Number of samples that the marker stays HIGH*/
     
     /* Update duty cycle */
-    OC1SetDutyCycle(usWaveform[usWaveIndex]);
-
+    if(OC1SetDutyCycle(usWaveform[usWaveIndex]) != 0)
+    {
+        printf("\r\nError changing OC1RS.");
+        while(1);
+    }
+    
+    #if DEBUGGING
+    printf("\r\nByte Received: %d", usWaveform[usWaveIndex]);
+    #endif
+    
     /* External Marker */
-    if(usWaveIndex>=usPhaseIndex && usWaveIndex<=(usPhaseIndex+mainAwgMARKER_WIDTH))
+    if((usWaveIndex >= usPhaseIndex) && (usWaveIndex <= (usPhaseIndex+mainAwgMARKER_WIDTH)))
     {
         LATEbits.LATE8 = 1;
     }
@@ -437,8 +473,9 @@ void vT3InterruptHandler(void)
         LATEbits.LATE8 = 0;
     }
     
-    /* Repeat period */
     usWaveIndex++;
+    
+    /* Repeat period */
     if(usWaveIndex>=mainAwgWAVEFORM_SIZE)
     {
         usWaveIndex=0;
@@ -464,18 +501,22 @@ void vU1InterruptHandler(void) {
     /* Received byte */
     uint8_t ucTxInput=0;
     uint8_t ucTrash;
-    bool ucHasRxed = false;
+    bool ucHasRxed = false; /* True if a valid byte was received */
     
-    if(U1STAbits.OERR ||U1STAbits.FERR || U1STAbits.PERR) // receive errors?
+    if(U1STAbits.OERR ||U1STAbits.FERR || U1STAbits.PERR) /* Error checking */
 	{
-		ucTrash = U1RXREG; /* dummy read to clear FERR/PERR */
-		U1STAbits.OERR = 0; /* clear OERR to keep receiving */
+		ucTrash = U1RXREG; /* Read to clear FERR/PERR */
+		U1STAbits.OERR = 0; /* Clear OERR to keep receiving */
 	}
 	if(U1STAbits.URXDA)
 	{
-		ucTxInput = U1ARXREG; /* get data from UART RX FIFO */
-        ucHasRxed=true;
+		ucTxInput = U1ARXREG; /* Get data from UART RX FIFO */
+        ucHasRxed=true; /* Byte was received */ 
 	}
+    
+    #if DEBUGGING
+    printf("\r\nByte Received: %d", ucTxInput);
+    #endif
     
     if(ucTxInput=='l')
     {
@@ -486,6 +527,9 @@ void vU1InterruptHandler(void) {
     {
         Timer3Start();
         ucIsCommand=true; /* Next inputs are commands, send them to interface task */
+        #if DEBUGGING
+        printf("\r\nSamples Received: %d", usArbWaveIndex);
+        #endif
     }
     
     IFS0bits.U1RXIF = 0; /* clear the RX interrupt flag */

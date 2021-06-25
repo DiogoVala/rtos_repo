@@ -47,7 +47,7 @@ int8_t Timer3Config(uint32_t frequency){
     }
     else
     {
-        return TIMER3_FREQUENCY_NOT_SUP;
+        T3CONbits.TON = 0;
     }
 	return 0;
 }
